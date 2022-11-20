@@ -271,6 +271,8 @@ Package setup:
 npm install express-session
 ```
 
+Do not use cookie-parser anymore!
+
 ### Basic setup of express session:
 
 ```js
@@ -452,10 +454,140 @@ The `req.session.cookie.originalMaxAge` property returns the original `maxAge
 
 To get the ID of the loaded session, access the request property `req.sessionID`. This is simply a read-only value set when a session is loaded/created.
 
+
+
+### Use express session to authenticate user
+
+```js
+require('dotenv').config();
+const express = require('express');
+const bodyParser = require('body-parser');
+const session = require('express-session');
+const MongoStore = require('connect-mongo');
+const ejs = require('ejs');
+const db = require('./dbUtils.js');
+const app = express();
+
+app.set('view engine', 'ejs');
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(express.static('public'));
+app.use(session({
+    secret: process.env.SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+        //60 seconds
+        maxAge: 60000
+    },
+    store: MongoStore.create({ mongoUrl: 'mongodb://127.0.0.1:27017/sessionDB' })
+}));
+
+
+app.route("/")
+    .get((req, res) => {
+        res.render('home');
+    });
+app.route("/login")
+    .get((req, res) => {
+        if (req.session.loggedIn)
+            res.redirect('secrets');
+        else
+            res.render('login');
+    })
+    .post((req, res) => {
+        const email = req.body.username;
+        const password = req.body.password;
+        db.findUser(email).then(user => {
+            if (user) {
+                if (user.password === password) {
+                    req.session.loggedIn = true;
+                    req.session.email = email;
+                    res.redirect('/secrets');
+                }
+                else
+                    res.redirect('/login');
+            }
+            else
+                res.redirect('/login');
+        });
+    });
+
+
+
+app.route("/register")
+    .get((req, res) => {
+        if (req.session.loggedIn)
+            res.redirect('/secrets');
+        else
+            res.render('register');
+    })
+    .post((req, res) => {
+        const email = req.body.username;
+        const password = req.body.password;
+        db.findUser(email).then(user => {
+            if (user)
+                res.redirect('login');
+            else {
+                db.addUser(email, password).then(user => {
+                    if (user) {
+                        req.session.loggedIn = true;
+                        req.session.email = email;
+                        res.redirect('/secrets');
+                    }
+                    else
+                        res.redirect('/register');
+                });
+            }
+        });
+    });
+
+app.route("/logout")
+    .get((req, res) => {
+        req.session.destroy(err => {
+            if (err)
+                console.log(err);
+            else
+                res.redirect('/');
+        });
+    });
+
+app.route("/secrets")
+    .get((req, res) => {
+        if (req.session.loggedIn) {
+            res.render('secrets');
+            console.log(req.session.cookie.expires);
+        }
+        else
+            res.redirect('login');
+    });
+
+(async () => {
+    await db.connect('usedSecretDB');
+    app.listen(3000, () => console.log('Server started on port 3000'));
+})().then(() => { console.log('Done'); });
+```
+
+![](assets_Security/2022-11-19-22-09-37-image.png)
+
+Each time the user is authenticated, we can find a cookie like this in the developer tools. The value of the cookie is the encrypted session id.
+
+The connect-mongo middleware will add a document like this:
+
+![](assets_Security/2022-11-19-22-11-41-image.png)
+
 ## Passport.js
 
-setup:
+The point of using passport - while express session can already handle the authentication task - is that we the passport and passport-local-mongoose can automatically do the encryption process and store it to mongoDB. Furthermore, passport-local is the local strategy, but passport provides more strategies like google strategy that allows the web application to use google to authenticate user.
+
+Passport is built on top of express session, so you should set up session before setting up passport.
+
+### Use passport local strategy
+
+Packages setup:
 
 ```bash
 npm i passport passport-local passport-local-mongoose
 ```
+
+
